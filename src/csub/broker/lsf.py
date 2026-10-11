@@ -7,11 +7,9 @@ first (a forced SSH command has no login environment).
 
 from __future__ import annotations
 
-import os
 import re
 import shlex
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -75,12 +73,9 @@ class LsfRunner:
         cfg: LsfConfig,
         *,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-        own_prefix: str | None = None,
     ):
         self.cfg = cfg
         self._run = run
-        self._own_prefix = os.path.realpath(own_prefix or sys.prefix)
-        self._checked: set[str] = set()
 
     # --- plumbing ---
 
@@ -93,32 +88,9 @@ class LsfRunner:
             return [*bash, "-c", script, tool, *args]
         return [tool, *args]
 
-    def _check_not_self(self, tool: str) -> None:
-        """Refuse to call a `bsub` that lives in our own install prefix (a shim)."""
-        if tool in self._checked or "/" in tool:
-            return
-        self._checked.add(tool)
-        try:
-            cp = self._run(
-                self.argv("bash", ["-c", "command -v " + shlex.quote(tool)]),
-                capture_output=True,
-                text=True,
-                timeout=self.cfg.timeout_s,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return
-        path = cp.stdout.strip()
-        if path and os.path.realpath(path).startswith(self._own_prefix + "/"):
-            raise CsubError(
-                "broker_misconfigured",
-                f"{tool} resolves to {path}, inside csub's own install prefix; "
-                f"LSF's {tool} is shadowed",
-            )
-
     def _exec(
         self, tool: str, args: list[str], *, input: str | None = None
     ) -> subprocess.CompletedProcess[str]:
-        self._check_not_self(tool)
         try:
             return self._run(
                 self.argv(tool, args),

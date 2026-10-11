@@ -184,6 +184,14 @@ def test_unknown_error_code_from_broker_becomes_internal():
     assert e.value.code == "internal_error"
 
 
+def test_transport_error_from_a_relay_is_kept():
+    err = {"code": "transport_error", "message": "m"}
+    data = parse_response(json.dumps({"protocol": 1, "ok": False, "error": err}))
+    with pytest.raises(CsubError) as e:
+        raise_for_response(data)
+    assert e.value.code == "transport_error"
+
+
 def test_csub_error_rejects_unknown_code():
     with pytest.raises(ValueError):
         CsubError("nonsense", "x")

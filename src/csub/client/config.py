@@ -6,7 +6,7 @@ import hashlib
 import os
 import shlex
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from typing import Any
 
 from csub.protocol import CsubError, Mount, ProtocolError
@@ -68,7 +68,7 @@ def mounts_to_string(mounts: tuple[Mount, ...]) -> str:
 
 
 def derive_session(mounts: tuple[Mount, ...]) -> str:
-    """A stable id for 'this set of mounts': jobs from the same container share it."""
+    """A stable id for 'this set of mounts': jobs submitted with the same mounts share it."""
     canonical = "\n".join(sorted(f"{m.path}:{m.mode}" for m in mounts))
     return hashlib.sha256(canonical.encode()).hexdigest()[:12]
 
@@ -181,4 +181,3 @@ __all__ = [
     "mounts_to_string",
     "parse_mounts",
 ]
-_ = field  # keep dataclasses.field import used for future defaults

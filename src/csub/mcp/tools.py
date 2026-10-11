@@ -19,12 +19,13 @@ from csub.protocol import (
 )
 
 INSTRUCTIONS = """\
-csub submits jobs to the LSF compute cluster. Every job runs in the same sandbox as this
-container: same image, same bind mounts at the same paths, no network unless allow_hosts
-says otherwise. Workflow: csub_probe once (queues, limits, prices) -> csub_submit ->
-csub_wait -> csub_logs. Size jobs in cpus / mem_mb / walltime_min; the broker turns that
-into LSF slots and picks the queue. Job output is in <cwd>/.csub/jobs/<job_id>/{stdout,stderr}
-on the shared filesystem, so you can read it directly too.
+csub submits jobs to the LSF compute cluster. Every job runs in a sandbox with your bind
+mounts at the same paths and no network unless allow_hosts says otherwise; its image is
+CSUB_IMAGE if set (inside a csub job: that job's image), else the policy default.
+Workflow: csub_probe once (queues, limits, prices) -> csub_submit -> csub_wait -> csub_logs.
+Size jobs in cpus / mem_mb / walltime_min; the broker turns that into LSF slots and picks
+the queue. Job output is in <cwd>/.csub/jobs/<job_id>/{stdout,stderr}; where the cluster
+filesystem is mounted you can read it directly too.
 """
 
 

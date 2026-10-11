@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from csub.cli import EXIT_CODES, main, parse_mem, parse_walltime
+from csub.cli import EXIT_CODES, main, parse_env, parse_mem, parse_walltime
 from csub.client.api import Logs, WaitEntry, WaitResult
 from csub.protocol import CsubError, JobStatus, KillResult, ProbeResult, SubmitResult
 
@@ -147,8 +147,15 @@ def test_submit_shell_variants(tmp_path):
     assert rc == 2 and "requires --shell" in err
     rc, _, err = run(c, "submit")
     assert rc == 2 and "no command" in err
-    rc, _, err = run(c, "submit", "--env", "NOEQUALS", "--", "x")
-    assert rc == 2 and "KEY=VALUE" in err
+    rc, _, err = run(c, "submit", "--env", "CSUB_TEST_UNSET_VAR", "--", "x")
+    assert rc == 2 and "not set in the environment" in err
+
+
+def test_env_without_value_comes_from_the_environment():
+    assert parse_env(["TOKEN", "A=1"], {"TOKEN": "s3cret"}) == {"TOKEN": "s3cret", "A": "1"}
+    assert parse_env(["EMPTY"], {"EMPTY": ""}) == {"EMPTY": ""}
+    with pytest.raises(CsubError, match="not set"):
+        parse_env(["MISSING"], {})
 
 
 def test_submit_json_and_errors():
@@ -290,3 +297,13 @@ def test_version_and_help():
     with pytest.raises(SystemExit) as e:
         main(["--version"])
     assert e.value.code == 0
+
+
+def test_relay_refuses_its_own_socket(tmp_path):
+    from csub.client.config import ClientConfig
+
+    sock = str(tmp_path / "s.sock")
+    c = FakeClient()
+    c.config = ClientConfig(transport="unix", socket=sock)
+    rc, _, err = run(c, "relay", sock)
+    assert rc == EXIT_CODES["invalid_request"] and "own socket" in err

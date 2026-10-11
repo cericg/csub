@@ -6,7 +6,6 @@ import pytest
 
 from csub.broker.lsf import LsfError, LsfRunner
 from csub.broker.policy import LsfConfig
-from csub.protocol import CsubError
 
 JANELIA_BSUB_OUT = "This job will be billed to flyem\nJob <1234> is submitted to queue <short>.\n"
 
@@ -123,21 +122,3 @@ def test_bkill_parsing():
     lsf, _ = runner((1, "", "bkill: cannot connect\n"))
     with pytest.raises(LsfError, match="cannot connect"):
         lsf.bkill("/g", ["1"])
-
-
-def test_self_shadow_guard(tmp_path):
-    prefix = tmp_path / "venv"
-    (prefix / "bin").mkdir(parents=True)
-    shim = prefix / "bin" / "bsub"
-    shim.write_text("#!/bin/sh\n")
-    r = Runner((0, f"{shim}\n", ""))
-    lsf = LsfRunner(LsfConfig(profile="", bsub="bsub"), run=r, own_prefix=str(prefix))
-    with pytest.raises(CsubError, match="shadowed") as e:
-        lsf.bsub([], "x")
-    assert e.value.code == "broker_misconfigured"
-    # a bsub outside our prefix is fine, and the check runs only once
-    r = Runner((0, "/usr/bin/bsub\n", ""), (0, JANELIA_BSUB_OUT, ""), (0, JANELIA_BSUB_OUT, ""))
-    lsf = LsfRunner(LsfConfig(profile="", bsub="bsub"), run=r, own_prefix=str(prefix))
-    lsf.bsub([], "x")
-    lsf.bsub([], "x")
-    assert len(r.calls) == 3

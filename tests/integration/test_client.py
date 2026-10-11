@@ -1,15 +1,20 @@
-"""Client -> LocalTransport -> real broker -> fakes, including nested submission from a job."""
+"""Client -> LocalTransport -> real broker -> fakes, incl. nested submission and the relay."""
 
+import os
 import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 
 import pytest
 
 from csub.client.api import Client
 from csub.client.config import ClientConfig
-from csub.protocol import Mount
-from csub.transport import LocalTransport
+from csub.protocol import CsubError, Mount
+from csub.transport import LocalTransport, UnixTransport
+from tests.support.procs import wait_until
 
 pytestmark = pytest.mark.integration
 
@@ -132,3 +137,57 @@ def test_nested_submission_via_injected_cli(client, project_dir, fake_lsf):
     child = out.split()[1]
     assert fake_lsf.job(child)["group"] == fake_lsf.job(parent.job_id)["group"]
     assert client.wait([child], timeout_s=60).jobs[0].stdout_tail == "grandchild\n"
+
+
+@pytest.fixture
+def start_relay(broker_env):
+    """`csub relay SOCK` as a subprocess, its upstream the local broker command given."""
+    base = tempfile.mkdtemp(prefix="csub-")  # Unix socket paths are limited to ~100 bytes
+    procs = []
+
+    def _start(broker_cmd: str) -> str:
+        path = os.path.join(base, f"r{len(procs)}.sock")
+        env = {**broker_env, "CSUB_TRANSPORT": "local", "CSUB_BROKER_CMD": broker_cmd}
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "csub.cli", "relay", path], env=env, stderr=subprocess.PIPE
+        )
+        procs.append(proc)
+        wait_until(lambda: os.path.exists(path) or proc.poll() is not None, what="relay socket")
+        assert proc.poll() is None, proc.stderr.read()
+        return path
+
+    yield _start
+    for proc in procs:
+        proc.terminate()
+        proc.wait(timeout=10)
+    shutil.rmtree(base, ignore_errors=True)
+
+
+def test_sandbox_through_relay(start_relay, broker_cmd, project_dir, roots, monkeypatch):
+    """Chain 3: csub in a sandbox -> unix socket -> csub relay -> broker (here: local)."""
+    monkeypatch.chdir(project_dir)
+    sock = start_relay(shlex.join(broker_cmd))
+    cfg = ClientConfig(
+        transport="unix",
+        socket=sock,
+        mounts=(Mount(str(project_dir), "rw"),),
+        session="relaysess",
+        wait_max_poll_s=0.5,
+    )
+    client = Client(cfg, UnixTransport(sock))
+    assert client.probe().queues["short"]["mem_per_slot_mb"] == 15360
+    r = client.submit(command=["sh", "-c", "echo relayed"], name="relayed")
+    assert r.session == "relaysess"
+    w = client.wait([r.job_id], timeout_s=60)
+    assert w.all_done and w.jobs[0].stdout_tail == "relayed\n"
+    with pytest.raises(CsubError) as e:
+        client.submit(command=["true"], image="localhost/x:1")
+    assert e.value.code == "policy_violation"
+
+
+def test_relay_without_broker_is_transport_error(start_relay, project_dir):
+    sock = start_relay("/no/such/csub-broker")
+    client = Client(ClientConfig(transport="unix", socket=sock), UnixTransport(sock))
+    with pytest.raises(CsubError) as e:
+        client.probe()
+    assert e.value.code == "transport_error" and "not found" in e.value.message

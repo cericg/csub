@@ -271,7 +271,7 @@ def check_image(image: str | None, policy: Policy, *, sandbox: str = "podman") -
 
 def check_mounts(spec: JobSpec, policy: Policy, ctx: ResolveContext) -> tuple[ResolvedMount, ...]:
     if not spec.mounts:
-        raise _invalid("no mounts given; is CSUB_MOUNTS set in the submitting container?")
+        raise _invalid("no mounts given; is CSUB_MOUNTS set where the client runs?")
     home = ctx.home
     resolved: list[ResolvedMount] = []
     for m in spec.mounts:

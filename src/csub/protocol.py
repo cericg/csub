@@ -520,7 +520,9 @@ def raise_for_response(data: dict[str, Any]) -> dict[str, Any]:
     """Turn an ``ok: false`` response into a CsubError; return the payload otherwise."""
     if not data["ok"]:
         err = data["error"]
-        code = err["code"] if err["code"] in ERROR_CODES else "internal_error"
+        # transport_error arrives from a relay that cannot reach the broker.
+        known = ERROR_CODES + CLIENT_ERROR_CODES
+        code = err["code"] if err["code"] in known else "internal_error"
         raise CsubError(code, err["message"], err.get("details"))
     return data
 
@@ -715,7 +717,8 @@ JOBSPEC_SCHEMA: dict[str, Any] = {
         },
         "image": {
             "description": (
-                "Container image; defaults to the image this container runs in. "
+                "Container image; defaults to CSUB_IMAGE (inside a csub job: that job's "
+                "image), else the policy default. "
                 "Must be allowed by policy. Queues that run under bwrap (see csub_probe) "
                 "take no image; the response's `sandbox` says which backend ran."
             ),
