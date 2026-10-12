@@ -1,8 +1,9 @@
 """``csub-broker``: one JSON request in, one JSON response out — or ``--serve SOCKET``.
 
 The same handler serves the SSH forced command (stdin/stdout), the local transport, and
-the per-job Unix socket inside a job wrapper. Policy is loaded per request so edits take
-effect immediately and a broken policy is reported, never half-applied.
+``--serve`` sockets, per job (started by the wrapper) or started by hand for a sandbox. Policy
+is loaded per request so edits take effect immediately and a broken policy is reported, never
+half-applied.
 """
 
 from __future__ import annotations

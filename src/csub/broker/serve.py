@@ -1,7 +1,8 @@
-"""Per-job broker: accept one request per connection on a Unix socket.
+"""Accept one request per connection on a Unix socket.
 
-Started by the job wrapper outside the sandbox; the socket file is bind-mounted into the
-container. Each connection sends one JSON request and half-closes; we answer and close.
+Used by the per-job broker (``csub-broker --serve``, started by the job wrapper outside the
+sandbox; the socket file is bind-mounted into the container) and by ``csub relay``. Each
+connection sends one JSON request and half-closes; we answer and close.
 Requests are handled sequentially — a job's own submissions are rarely concurrent and the
 handler re-reads the policy per request, so there is nothing to share.
 """

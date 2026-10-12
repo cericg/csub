@@ -19,6 +19,7 @@ MODULES = [
     "csub.broker.serve",
     "csub.transport",
     "csub.client",
+    "csub.client.relay",
     "csub.cli",
 ]
 

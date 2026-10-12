@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, TextIO
 
 from csub import __version__
@@ -60,12 +60,17 @@ def parse_walltime(text: str) -> int:
     raise UsageError(f"--walltime: cannot parse {text!r} (use minutes or HH:MM)")
 
 
-def parse_env(items: Sequence[str]) -> dict[str, str]:
+def parse_env(items: Sequence[str], environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """``KEY=VALUE``, or ``KEY`` alone to pass on our own value. The latter keeps secrets off the
+    command line, where ``ps`` shows them to every user of a shared host."""
+    environ = os.environ if environ is None else environ
     env: dict[str, str] = {}
     for item in items:
         key, sep, value = item.partition("=")
         if not sep:
-            raise UsageError(f"--env: expected KEY=VALUE, got {item!r}")
+            if key not in environ:
+                raise UsageError(f"--env {key}: not set in the environment (or use KEY=VALUE)")
+            value = environ[key]
         env[key] = value
     return env
 
@@ -100,7 +105,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--walltime", help="minutes or HH:MM; prefer <= 60 (the short queue)")
     s.add_argument("-q", "--queue")
     s.add_argument("--image")
-    s.add_argument("--env", action="append", default=[], metavar="KEY=VALUE")
+    s.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY[=VALUE]",
+        help="set KEY in the job; without a value, pass on this shell's KEY",
+    )
     s.add_argument(
         "--allow", action="append", default=[], metavar="HOST", help="allow HTTP(S) egress to HOST"
     )
@@ -142,6 +153,16 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--cwd", help="the job's working directory (default: ask the broker)")
 
     sub.add_parser("probe", help="show what the broker allows: queues, limits, images, hosts")
+
+    r = sub.add_parser(
+        "relay",
+        help="serve a Unix socket for a sandbox and forward its requests to the broker",
+        description="Run outside a sandbox on a host without LSF. Serves SOCKET (bind it into "
+        "the sandbox read-only, with CSUB_TRANSPORT=unix CSUB_SOCKET=SOCKET there) and forwards "
+        "each request unchanged over this client's configured transport, usually ssh to the "
+        "submit host.",
+    )
+    r.add_argument("socket", metavar="SOCKET")
     return p
 
 
@@ -378,6 +399,17 @@ def cmd_probe(ns, client: Client, out: TextIO) -> int:
     return 0
 
 
+def cmd_relay(ns, client: Client, err: TextIO) -> int:
+    from csub.client.relay import relay
+
+    cfg = client.config
+    if cfg.transport == "unix" and os.path.realpath(cfg.socket or "") == os.path.realpath(
+        ns.socket
+    ):
+        raise UsageError(f"relay: {ns.socket} is this client's own socket (set CSUB_TRANSPORT)")
+    return relay(ns.socket, client.transport, stderr=err)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -405,6 +437,8 @@ def main(
             return cmd_logs(ns, client, out)
         if ns.cmd == "probe":
             return cmd_probe(ns, client, out)
+        if ns.cmd == "relay":
+            return cmd_relay(ns, client, err)
         parser.error(f"unknown command {ns.cmd}")
     except CsubError as e:
         if ns.json:

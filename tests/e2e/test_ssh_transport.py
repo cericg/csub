@@ -22,7 +22,7 @@ import pytest
 from csub.client.api import Client
 from csub.client.config import ClientConfig
 from csub.protocol import Mount
-from csub.transport import SshTransport, TransportError
+from csub.transport import SshTransport, TransportError, UnixTransport
 from tests.support.procs import wait_until
 
 pytestmark = [pytest.mark.e2e, pytest.mark.integration]
@@ -195,3 +195,39 @@ def test_ssh_failure_is_transport_error(sshd, ssh_transport):
         bad.call({"protocol": 1, "op": "probe"})
     t0 = time.time()
     assert time.time() - t0 < 30 and sys.platform == "linux"
+
+
+def test_sandbox_through_relay_over_ssh(sshd, broker_env, project_dir, monkeypatch):
+    """Chain 3 for real: csub -> unix socket -> csub relay -> ssh -> forced-command broker."""
+    monkeypatch.chdir(project_dir)
+    sock = str(sshd.base / "relay.sock")
+    env = {
+        **broker_env,
+        "XDG_RUNTIME_DIR": str(sshd.base),  # ControlPath under the short base dir
+        "CSUB_TRANSPORT": "ssh",
+        "CSUB_SSH_HOST": "127.0.0.1",
+        "CSUB_SSH_PORT": str(sshd.port),
+        "CSUB_SSH_USER": pwd.getpwuid(os.getuid()).pw_name,
+        "CSUB_SSH_KEY": str(sshd.client_key),
+        "CSUB_SSH_OPTS": f"StrictHostKeyChecking=no UserKnownHostsFile={sshd.base}/kh",
+    }
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "csub.cli", "relay", sock], env=env, stderr=subprocess.PIPE
+    )
+    try:
+        wait_until(lambda: os.path.exists(sock) or proc.poll() is not None, what="relay socket")
+        assert proc.poll() is None, proc.stderr.read()
+        cfg = ClientConfig(
+            transport="unix",
+            socket=sock,
+            mounts=(Mount(str(project_dir), "rw"),),
+            session="relaysess",
+            wait_max_poll_s=0.5,
+        )
+        client = Client(cfg, UnixTransport(sock))
+        r = client.submit(command=["sh", "-c", "echo via-relay"], name="relay")
+        w = client.wait([r.job_id], timeout_s=60)
+        assert w.all_done and w.jobs[0].stdout_tail == "via-relay\n", sshd.log.read_text()[-2000:]
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)

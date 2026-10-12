@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from csub.client import logs as _logs
@@ -141,7 +141,8 @@ class Client:
         if not spec.mounts:
             if not self.config.mounts:
                 raise ConfigError(
-                    "no mounts: CSUB_MOUNTS must describe this container's bind mounts "
+                    "no mounts: CSUB_MOUNTS must list the sandbox's bind mounts, or without a "
+                    "sandbox the directories jobs may use "
                     '(e.g. "/groups/lab/project:rw,/nrs/lab/data:ro")'
                 )
             changes["mounts"] = self.config.mounts
@@ -281,6 +282,3 @@ def logs(job_id: str, **kw: Any) -> Logs:
 
 def probe() -> ProbeResult:
     return default_client().probe()
-
-
-_ = field
